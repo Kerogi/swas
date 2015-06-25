@@ -26,10 +26,3 @@
 *.exe
 *.out
 *.app
-*.pdb
-*.idb
-*.ilk
-*.res
-*.suo
-*.sdf
-*.aps

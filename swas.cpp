@@ -9,9 +9,6 @@
 #include <tchar.h>
 #include <psapi.h>
 #include <Strsafe.h>
-#include <shlwapi.h>
-#pragma comment(lib,"shlwapi.lib")
-#include <shlobj.h>
 #include "resource.h"
 
 #define MAX_LOADSTRING 100
@@ -19,12 +16,6 @@
 
 const TCHAR sChromeDetected[] = TEXT("Chrome detected");
 const TCHAR sChromeNotDetected[] = TEXT("Chrome not detected");
-const TCHAR sSendFailed[] = TEXT("Send failed");
-const TCHAR sSendSucess[] = TEXT("Send succesed");
-const TCHAR sImageName[] = TEXT("chrome.exe");
-const TCHAR sSendUrl[] = TEXT("localhost:9999/upload");
-const TCHAR sFilePath[] = TEXT("\\Google\\Chrome\\User Data\\Default\\Current Tabs");
-
 const float refreshratehz = 2;
 struct ChromeInfo{
 	bool bValid;
@@ -65,7 +56,7 @@ bool MatcProcessImageName(DWORD dwProcId,const TCHAR* szImageName, bool bTestRun
 	return bResult;
 }
 
-bool DetectChrome(ChromeInfo* pPrevInfo,  const TCHAR* szChromeImageName, bool bRetry = false) {
+bool DetectChrome(ChromeInfo* pPrevInfo, bool bRetry = false, const TCHAR* szChromeImageName = TEXT("chrome.exe")) {
 	if(pPrevInfo && pPrevInfo->bValid) {
 		pPrevInfo->bValid = MatcProcessImageName(pPrevInfo->dwProcId, szChromeImageName, true);
 		if(!(!pPrevInfo->bValid && bRetry))
@@ -90,46 +81,6 @@ bool DetectChrome(ChromeInfo* pPrevInfo,  const TCHAR* szChromeImageName, bool b
 	}
 	return false;
 }
-#include <vector>
-
-typedef std::vector<char> bytearray;
-bool LoadFile(HANDLE hFile, bytearray* pDst) {
-	if (hFile == INVALID_HANDLE_VALUE)  return false;
-	if (NULL == pDst) return false;
-	LARGE_INTEGER nSize = {0};
-	if (GetFileSizeEx(hFile,&nSize)){
-		DWORD filesize = nSize.LowPart; // possible loss of data
-		DWORD readsize;
-		LPBYTE pData;
-		if(ReadFile(hFile, &pData, filesize, &readsize, NULL)){
-			if(readsize == filesize) {
-				pDst->reserve(filesize+1);
-				pDst->assign(pData, pData+readsize);
-				return true;
-			}
-		}
-	}
-	return false;
-}
-
-bool SendFile(const TCHAR* sFilePath, const TCHAR* sUrl){
-	TCHAR szPath[MAX_PATH];
-	if (SUCCEEDED(SHGetFolderPath(NULL, CSIDL_LOCAL_APPDATA, NULL, 0, szPath)))
-	{
-		if(PathAppend( szPath, sFilePath )) {
-			HANDLE hFile = CreateFile(szPath,GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL,OPEN_EXISTING, 0, 0);
-			if (hFile != INVALID_HANDLE_VALUE)
-			{
-				bytearray bFile;
-				bool res = LoadFile(hFile,&bFile);
-				CloseHandle(hFile);
-				return res;
-			}
-		}
-		
-	}
-	return false;
-}
  
 INT_PTR CALLBACK DlgProc(
   _In_ HWND   hwndDlg,
@@ -141,9 +92,6 @@ INT_PTR CALLBACK DlgProc(
 	static ChromeInfo chromeInfo;
 	static TCHAR lszChromeDetected[MAX_LOADSTRING];
 	static TCHAR lszChromeNotDetected[MAX_LOADSTRING];
-	static TCHAR lszSendSucess[MAX_LOADSTRING];
-	static TCHAR lszSendFailed[MAX_LOADSTRING];
-	static TCHAR lszImageName[MAX_LOADSTRING];
 
 	switch (uMsg)
 	{
@@ -151,9 +99,6 @@ INT_PTR CALLBACK DlgProc(
 			{
 				HINSTANCE hInstance = reinterpret_cast<HINSTANCE>(lParam);
 				TCHAR szTemp[MAX_LOADSTRING];
-				if (0 == LoadString(hInstance, IDS_CHROME_DETECTED, lszImageName, MAX_LOADSTRING)){
-					StringCbCopy(lszImageName, MAX_LOADSTRING, sImageName);
-				}				
 				if (0 != LoadString(hInstance, IDS_APP_TITLE, szTemp, MAX_LOADSTRING)){
 					SetWindowText(hwndDlg, szTemp);
 				}
@@ -167,13 +112,6 @@ INT_PTR CALLBACK DlgProc(
 					StringCbCopy(lszChromeNotDetected, MAX_LOADSTRING, sChromeNotDetected);
 				}
 				SetDlgItemText(hwndDlg, IDC_LBL_CHROME_STATUS, lszChromeNotDetected);
-				
-				if (0 == LoadString(hInstance, IDS_SEND_SUCCESS, lszSendSucess, MAX_LOADSTRING)){
-					StringCbCopy(lszSendSucess, MAX_LOADSTRING, sSendSucess);
-				}
-				if (0 == LoadString(hInstance, IDS_SEND_FAILED, lszSendFailed, MAX_LOADSTRING)){
-					StringCbCopy(lszSendFailed, MAX_LOADSTRING, sSendFailed);
-				}
 
 				if (0 != SetTimer(hwndDlg,	IDT_REFRESH_CHROME_STATUS, int(1000 / refreshratehz), NULL))
 				{
@@ -192,7 +130,7 @@ INT_PTR CALLBACK DlgProc(
 			switch (wParam) 
 			{ 
 				case IDT_REFRESH_CHROME_STATUS: 
-					if(DetectChrome(&chromeInfo, lszImageName)){
+					if(DetectChrome(&chromeInfo)){
 						SetDlgItemText(hwndDlg, IDC_LBL_CHROME_STATUS, lszChromeDetected);
 					} else {
 						SetDlgItemText(hwndDlg, IDC_LBL_CHROME_STATUS, lszChromeNotDetected);
@@ -207,16 +145,9 @@ INT_PTR CALLBACK DlgProc(
 			switch (wmId)
 			{
 				case IDC_BTN_SEND:
-
-					if(SendFile(sFilePath, sSendUrl)){
-						SetDlgItemText(hwndDlg, IDC_LBL_SEND_STATUS, lszSendSucess);
-					} else {
-						SetDlgItemText(hwndDlg, IDC_LBL_SEND_STATUS, lszSendFailed);
-					}
-					
 					return TRUE;	
 				case IDC_BTN_REFRESH:
-					if(DetectChrome(&chromeInfo, lszImageName, true)){
+					if(DetectChrome(&chromeInfo, true)){
 						SetDlgItemText(hwndDlg, IDC_LBL_CHROME_STATUS, lszChromeDetected);
 					} else {
 						SetDlgItemText(hwndDlg, IDC_LBL_CHROME_STATUS, lszChromeNotDetected);
