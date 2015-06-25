@@ -3,6 +3,13 @@
 *.lo
 *.o
 *.obj
+*.tlog
+*.aps
+
+# Debub 
+*.ilk
+*.idb
+*.pdb
 
 # Precompiled Headers
 *.gch
@@ -26,10 +33,11 @@
 *.exe
 *.out
 *.app
+
+#visual studio stuff
+*.suo
+*.opensdf
 *.sdf
-*.aps
-*.ilk
-*.idb
-*.obj
-*.pdb
-Debug/*
+
+
+app/Debug/*
