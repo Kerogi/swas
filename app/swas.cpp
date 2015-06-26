@@ -27,15 +27,14 @@
 #define MAX_LOADSTRING 100
 #define IDT_REFRESH_CHROME_STATUS 1212
 
-const TCHAR sChromeDetected[] = TEXT("Chrome detected");
-const TCHAR sChromeNotDetected[] = TEXT("Chrome not detected");
-const TCHAR sSendFailed[] = TEXT("Send failed");
-const TCHAR sSendSuccess[] = TEXT("Send successed");
+const TCHAR g_tcChromeDetected[] = TEXT("Chrome detected");
+const TCHAR g_tcChromeNotDetected[] = TEXT("Chrome not detected");
+const TCHAR g_tcSendFailed[] = TEXT("Send failed");
+const TCHAR g_tcSendSuccess[] = TEXT("Send successed");
 
-const TCHAR sFileName[] = TEXT("Google\\Chrome\\User Data\\Default\\Current Tabs");
-//const TCHAR sFileName[] = TEXT("image.jpg");
-const TCHAR sImageName[] = TEXT("chrome.exe");
-const TCHAR sUrl[] = TEXT("http://localhost:9999/upload");
+const TCHAR g_tcRawFilepath[] = TEXT("%LOCALAPPDATA%\\Google\\Chrome\\User Data\\Default\\Current Tabs");
+const TCHAR g_tcImageName[] = TEXT("chrome.exe");
+const TCHAR g_tcUrl[] = TEXT("http://localhost:9999/upload");
 
 const float refreshratehz = 2;
 struct ChromeInfo{
@@ -43,14 +42,75 @@ struct ChromeInfo{
 	DWORD dwProcId;
 	ChromeInfo():bValid(false) {}
 };
+typedef std::basic_string<TCHAR> tstring;
+typedef std::basic_stringstream<TCHAR , std::char_traits<TCHAR>, std::allocator<TCHAR> > tstringstream;
 
-bool MatcProcessImageName(DWORD dwProcId,const TCHAR* szImageName, bool bTestRunning=false)
+void ShowAnError(DWORD err, const TCHAR* pDesc = NULL, const TCHAR* pModuleName = NULL) {
+	HMODULE IssuedModule = 0;
+	TCHAR tcModuleName[MAX_PATH];
+	if(pModuleName) {
+		HANDLE hProc = OpenProcess( PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, FALSE, GetCurrentProcessId() );
+		if(hProc) {
+			HMODULE hMods[128];
+			DWORD nRetCountMod = 0;
+			if(EnumProcessModules(hProc, hMods, sizeof(hMods), &nRetCountMod)) {
+				for(DWORD i=0; i <= nRetCountMod; ++i) {
+					if(0 != hMods[i]
+						&& 0 != GetModuleBaseName( hProc, hMods[i], tcModuleName, sizeof(tcModuleName)/sizeof(TCHAR) ) 
+						&& 0 != StrStrI(tcModuleName, pModuleName))
+						{
+							IssuedModule = hMods[i];
+							break;
+						}
+				}
+			}
+			CloseHandle(hProc);
+		}
+	}
+	LPTSTR errorText = NULL;
+	DWORD nFlags = FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_IGNORE_INSERTS;
+	if( 0 != IssuedModule) nFlags |= FORMAT_MESSAGE_FROM_HMODULE;
+	else nFlags |= FORMAT_MESSAGE_FROM_SYSTEM;
+	if(0 == FormatMessage( nFlags,
+						((0 != IssuedModule)?(IssuedModule): NULL),
+						err,
+						MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
+						(LPTSTR) &errorText,
+						0,
+						NULL))
+	{
+		//ShowAnError(GetLastError(), TEXT("Format Error error"),NULL,recCounter);
+		tstringstream os;
+		if(IssuedModule) {os<<tcModuleName;}
+		else {os<<"Unknown";}
+		os<<TEXT(" error = ")<<err;
+		//os<<TEXT(" FormatMessage error = ")<<;
+		if(pDesc) {		
+			MessageBox(NULL, os.str().c_str(), pDesc, MB_OK|MB_ICONWARNING );
+		} else {
+			MessageBox(NULL, os.str().c_str(), TEXT("Error"), MB_OK|MB_ICONWARNING );
+		}
+	} else {
+		if(pDesc) {		
+			MessageBox(NULL, (LPCTSTR)errorText, pDesc, MB_OK|MB_ICONWARNING );
+		} else {
+			MessageBox(NULL, (LPCTSTR)errorText, TEXT("Error"), MB_OK|MB_ICONWARNING );
+		}
+
+		if( NULL != errorText )	{
+		   LocalFree( errorText );
+		   errorText = 0;
+		}
+	}
+}
+
+bool MatcProcesg_tcImageName(DWORD dwProcId,const TCHAR* tcImageName, bool bTestRunning=false)
 {
-	if(NULL == szImageName) return false;
+	if(NULL == tcImageName) return false;
 	HANDLE hProc = OpenProcess( PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, FALSE, dwProcId );
 	bool bHasName= false;
 	bool bResult = false;
-	TCHAR szModuleName[MAX_PATH];
+	TCHAR tcModuleName[MAX_PATH];
 	if (NULL != hProc ) {
 		if(bTestRunning) {
 			DWORD ExitCode = 0;
@@ -63,23 +123,23 @@ bool MatcProcessImageName(DWORD dwProcId,const TCHAR* szImageName, bool bTestRun
 		HMODULE hMod;
 		DWORD nRetCountMod = 0;
 		if(EnumProcessModules(hProc, &hMod, sizeof(hMod), &nRetCountMod)){
-			bHasName = (0 != GetModuleBaseName( hProc, hMod, szModuleName, sizeof(szModuleName)/sizeof(TCHAR) ) );
+			bHasName = (0 != GetModuleBaseName( hProc, hMod, tcModuleName, sizeof(tcModuleName)/sizeof(TCHAR) ) );
 		} else {
-			bHasName = (0 != GetProcessImageFileName(hProc, szModuleName, sizeof(szModuleName)/sizeof(TCHAR)) ) ;
+			bHasName = (0 != GetProcessImageFileName(hProc, tcModuleName, sizeof(tcModuleName)/sizeof(TCHAR)) ) ;
 		}
 	}
 	if(bHasName) {
-		const TCHAR *pExeName = _tcsrchr(szModuleName, TEXT('\\'));	
-		pExeName = (pExeName) ? ++pExeName : szModuleName;
-		bResult = (0 == _tcscmp(pExeName, szImageName));
+		const TCHAR *pExeName = _tcsrchr(tcModuleName, TEXT('\\'));	
+		pExeName = (pExeName) ? ++pExeName : tcModuleName;
+		bResult = (0 == StrCmpI(pExeName,tcImageName));
 	}
 	CloseHandle(hProc);
 	return bResult;
 }
 
-bool DetectChrome(ChromeInfo* pPrevInfo, const TCHAR* szChromeImageName, bool bRetry = false) {
+bool DetectChrome(ChromeInfo* pPrevInfo, const TCHAR* tcChromeImageName, bool bRetry = false) {
 	if(pPrevInfo && pPrevInfo->bValid) {
-		pPrevInfo->bValid = MatcProcessImageName(pPrevInfo->dwProcId, szChromeImageName, true);
+		pPrevInfo->bValid = MatcProcesg_tcImageName(pPrevInfo->dwProcId, tcChromeImageName, true);
 		if(!(!pPrevInfo->bValid && bRetry))
 			return pPrevInfo->bValid;
 	} 
@@ -91,7 +151,7 @@ bool DetectChrome(ChromeInfo* pPrevInfo, const TCHAR* szChromeImageName, bool bR
 	for (int i = nProcCount; i > 0; --i ) {
 		DWORD dwCurrentProcId = runningProcessIds[i];
 		if(0 != dwCurrentProcId) {	
-			if(MatcProcessImageName(dwCurrentProcId, szChromeImageName)){
+			if(MatcProcesg_tcImageName(dwCurrentProcId, tcChromeImageName)){
 				if (pPrevInfo) {
 					pPrevInfo->bValid = true;
 					pPrevInfo->dwProcId = dwCurrentProcId;
@@ -103,27 +163,67 @@ bool DetectChrome(ChromeInfo* pPrevInfo, const TCHAR* szChromeImageName, bool bR
 	return false;
 }
 
-bool CreateFullPath(const TCHAR* sFilename, TCHAR* sFullPath, int nMaxFullpath) {
-	TCHAR szPath[MAX_PATH];
-	if (SUCCEEDED(SHGetFolderPath(NULL, CSIDL_LOCAL_APPDATA, NULL, 0, szPath)))
+bool CreateFullPath(const TCHAR* tcRawFileName, TCHAR* tcFullPath, int nMaxFullpath, TCHAR** sFilePart = 0) {
+	TCHAR tcPath[MAX_PATH];
+	int res = ExpandEnvironmentStrings(tcRawFileName, tcPath, MAX_PATH);
+	if (0 != res && res <= nMaxFullpath)
 	{
-		if(PathAppend(szPath, sFilename)){
-			if(SUCCEEDED(StringCbCopy(sFullPath, nMaxFullpath, szPath))){
-					return true;
-			}
+		int res = GetFullPathName(tcPath, nMaxFullpath, tcFullPath, sFilePart);
+		if(0 != res){
+			return true;
 		}
 	}
 	return false;
 }
 
-HANDLE GetFile(const TCHAR* sFilepath) {
-	HANDLE hFile = CreateFile(sFilepath,GENERIC_READ,FILE_SHARE_READ|FILE_SHARE_WRITE,NULL, OPEN_EXISTING, 0, NULL);
-	if(hFile) return hFile;
-
+HANDLE GetFile(const TCHAR* tcFilepath) {
+	HANDLE hFile = CreateFile(tcFilepath,GENERIC_READ,FILE_SHARE_READ|FILE_SHARE_WRITE,NULL, OPEN_EXISTING, 0, NULL);
+	if(hFile) {
+		return hFile;
+	} else {
+		ShowAnError(GetLastError(), TEXT("File error"));
+	}
 	return NULL;
 }
 
-bool GenerateBoundary(char* sDst, int nDstSize, const TCHAR* sFileName) {
+bool AllocAndCopyTCtoMB(char** ppDst, const TCHAR* pSrc, const int nLendth, UINT nCodePade = CP_ACP){
+	if(NULL == pSrc || nLendth<-0) return false;
+#ifdef UNICODE
+	char* pDst = new char[nLendth]; 
+	int res = WideCharToMultiByte( nCodePade, 0, pSrc, nLendth, pDst, nLendth, NULL, NULL );
+#else
+	char *pDst = new char[ nLendth]; 
+	int res = StringCbCopyA(pDst, pSrc, nLendth)
+#endif
+	if( res != 0) {
+		*ppDst = pDst;
+		return true;
+	} else {
+		delete[] pDst;
+	}
+	return false;
+}
+
+bool AllocAndCopyMBtoTC(TCHAR** ppDst, const char* pSrc, const int nLendth, UINT nCodePade = CP_ACP){
+	if(NULL == pSrc || nLendth<-0) return false;
+#ifdef UNICODE
+	TCHAR* pDst = new TCHAR[nLendth]; 
+	int res = MultiByteToWideChar(nCodePade, 0, pSrc, nLendth, pDst, nLendth);
+#else
+	char *pDst = new char[nLendth]; 
+	int res = StringCbCopyA(pDst, pSrc, nLendth)
+#endif
+	if( res != 0) {
+		*ppDst = pDst;
+		return true;
+	} else {
+		delete[] pDst;
+	}
+	return false;
+}
+
+
+bool GenerateBoundary(char* sDst, int nDstSize, const char* sFileName) {
 	if (nDstSize<38) return false;
 
     UUID uuid;
@@ -137,16 +237,7 @@ bool GenerateBoundary(char* sDst, int nDstSize, const TCHAR* sFileName) {
         if (wszUuid != NULL) {
 			if(SUCCEEDED(StringCbCopyA(sDst, nDstSize, wszUuid))) {
 				if(sFileName!=NULL) {
-#ifdef UNICODE
-					int nLenUnicode = lstrlenW( sFileName ); 
-					int nLen = WideCharToMultiByte( CP_ACP, 0, sFileName, nLenUnicode, NULL, 0, NULL, NULL ); 
-					char *sFilenameAnsi = new char[ nLenUnicode ]; 
-					WideCharToMultiByte( CP_ACP, 0, sFileName, nLenUnicode, sFilenameAnsi, nLen, NULL, NULL );
-					StringCchCatA(sDst, nDstSize, sFilenameAnsi);
-					delete[] sFilenameAnsi;
-#else
 					StringCchCatA(sDst, nDstSize, sFileName);
-#endif
 				}
 				result = true; 
 			}
@@ -157,35 +248,13 @@ bool GenerateBoundary(char* sDst, int nDstSize, const TCHAR* sFileName) {
 	return result;
 }
 
-void ShowAnError(DWORD err, const TCHAR* pDesc = NULL) {
-	LPTSTR Error = 0;
-	if(::FormatMessage( FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM,
-						NULL,
-						err,
-						0,
-						(LPTSTR)&Error,
-						0,
-						NULL) == 0)
-	{
-	   return;
-	}
-	if(pDesc) {		
-		MessageBox(NULL, Error, pDesc, MB_OK|MB_ICONWARNING );
 
-	} else {
-		MessageBox(NULL, Error, TEXT("Error"), MB_OK|MB_ICONWARNING );
-	}
-
-	if( Error )	{
-	   ::LocalFree( Error );
-	   Error = 0;
-	}
-}
 
 #define HEADERS_MAX_SIZE 512
 #define URL_PART_SIZE 24
-bool SendFile(HANDLE hFile, const TCHAR* sUrl, const char* sVariableName, const TCHAR* sFileName) {
+bool SendFile(HANDLE hFile, const TCHAR* sUrl, const char* sVariableName, const char* sFileName) {
 	if(!hFile) return false;
+	bool result = false;
 	LARGE_INTEGER lnSize;
 	if(!GetFileSizeEx(hFile, &lnSize)){
 		CloseHandle(hFile);
@@ -236,7 +305,7 @@ bool SendFile(HANDLE hFile, const TCHAR* sUrl, const char* sVariableName, const 
 			HINTERNET hReq = HttpOpenRequest(hConnect, TEXT("POST"), aUrl.lpszUrlPath, NULL, NULL, rgpszAcceptTypes, 
 				INTERNET_FLAG_NO_UI | INTERNET_FLAG_PRAGMA_NOCACHE | INTERNET_FLAG_RELOAD, 0);
 			if(hReq) {
-
+				
 
 				//see http://stackoverflow.com/questions/6407755/how-to-send-a-zip-file-using-wininet-in-my-vc-application
 				char sBoundary[HEADERS_MAX_SIZE];
@@ -250,8 +319,8 @@ bool SendFile(HANDLE hFile, const TCHAR* sUrl, const char* sVariableName, const 
 
 					osHeadPart<<"--"<<sBoundary<<endl;
 					osHeadPart<<"Content-Disposition: form-data; ";
-					osHeadPart<<"name=\""<<"filearg"<<"\"; ";
-					osHeadPart<<"filename=\""<<"Chrome Tabs"<<"\""<<endl;
+					osHeadPart<<"name=\""<<((NULL != sVariableName)?sVariableName:"filearg")<<"\"; ";
+					osHeadPart<<"filename=\""<<((NULL != sFileName)?sFileName:"Chrome Tabs")<<"\""<<endl;
 					osHeadPart<<"Content-Type: application/octet-stream"<<endl;
 					osHeadPart<<endl;
 
@@ -277,18 +346,22 @@ bool SendFile(HANDLE hFile, const TCHAR* sUrl, const char* sVariableName, const 
 						// or a while loop for call InternetWriteFile every 1024 bytes...
 
 						InternetWriteFile(hReq, (const void*)sTailPart.c_str(), sTailPart.length(), &bytesWritten);
+						result = true;
+					}else{
+						ShowAnError(GetLastError(), TEXT("Network error"), TEXT("Wininet"));
 					}
 				}
 				HttpEndRequest(hReq, NULL, HSR_INITIATE, 0);
-			}
-			else{
 
-				ShowAnError(GetLastError(), TEXT("Cant create request"));
+			}else{
+				ShowAnError(GetLastError(), TEXT("Network error"), TEXT("Wininet"));
 			}
+		}else{
+			ShowAnError(GetLastError(), TEXT("Network error"), TEXT("Wininet"));
 		}
 		InternetCloseHandle(hInternet);
 	}
-	return false;
+	return result;
 }
 
 bool LoadStringOrDefault(HINSTANCE hInst, TCHAR* lsDst, int nDstSize, UINT uStringResID, const TCHAR* szDefault) {
@@ -298,64 +371,112 @@ bool LoadStringOrDefault(HINSTANCE hInst, TCHAR* lsDst, int nDstSize, UINT uStri
 	}
 	return true;
 }
-
+bool UpdateField(HWND hWnd, UINT nCtrId, char* pStr, const int nLength, bool bSet = false){
+	if (NULL == pStr || nLength <=0 ) return false;
+	bool result = false;
+	if(bSet) {
+#ifdef UNICODE
+		TCHAR* sBuf= new TCHAR[nLength];
+		int nLenUnicode = MultiByteToWideChar(CP_ACP, 0, pStr, nLength, sBuf, nLength);
+		if(0 < nLenUnicode && nLenUnicode <= nLength) {
+			result = (0 != SetDlgItemText(hWnd, nCtrId, sBuf));
+		}
+		delete[] sBuf;
+#else
+		SetDlgItemText(hWnd, nCtrId, pStr);
+#endif	
+		return result;
+	} 
+#ifdef UNICODE
+	TCHAR* sBuf= new TCHAR[nLength];
+	int nLenUnicode = GetDlgItemText(hWnd, nCtrId, sBuf, nLength);
+	if(0 < nLenUnicode && nLenUnicode <= nLength-1) {
+		result = (0 != WideCharToMultiByte( CP_ACP, 0, sBuf, nLenUnicode, pStr, nLength, NULL, NULL ));
+		pStr[nLenUnicode] = 0;
+	}
+	delete[] sBuf;
+#else
+	GetDlgItemText(hWnd, nCtrId, pStr, nLength);
+#endif
+	return result;
+}
 INT_PTR CALLBACK DlgProc(
-  _In_ HWND   hwndDlg,
+  _In_ HWND   hDlg,
   _In_ UINT   uMsg,
   _In_ WPARAM wParam,
   _In_ LPARAM lParam
 ) {
 	int wmId, wmEvent;
 	static ChromeInfo chromeInfo;
-	static TCHAR lszChromeDetected[MAX_LOADSTRING];
-	static TCHAR lszChromeNotDetected[MAX_LOADSTRING];
-	static TCHAR lszSendSuccess[MAX_LOADSTRING];
-	static TCHAR lszSendFailed[MAX_LOADSTRING];
-	static TCHAR szFullPath[MAX_PATH];
+	static TCHAR ltcChromeDetected[MAX_LOADSTRING];
+	static TCHAR ltcChromeNotDetected[MAX_LOADSTRING];
+	static TCHAR ltcSendSuccess[MAX_LOADSTRING];
+	static TCHAR ltcSendFailed[MAX_LOADSTRING];
+
+	static char szVariable[MAX_LOADSTRING];
+	static char sRawFilepath[MAX_PATH];
+	static char sUrl[MAX_PATH];
 
 	switch (uMsg)
 	{
 		case WM_INITDIALOG:
 			{
+				ShowAnError(87);
 				HINSTANCE hInstance = reinterpret_cast<HINSTANCE>(lParam);
 				TCHAR szTemp[MAX_LOADSTRING];
 				if (0 != LoadString(hInstance, IDS_APP_TITLE, szTemp, MAX_LOADSTRING)){
-					SetWindowText(hwndDlg, szTemp);
+					SetWindowText(hDlg, szTemp);
 				}
 				if (0 != LoadString(hInstance, IDS_BTN_SEND_CAPTION, szTemp, MAX_LOADSTRING)){
-					SetDlgItemText(hwndDlg, IDC_BTN_SEND, szTemp);
+					SetDlgItemText(hDlg, IDC_BTN_SEND, szTemp);
 				}
-				LoadStringOrDefault(hInstance, lszChromeDetected, MAX_LOADSTRING, IDS_CHROME_DETECTED, sChromeDetected);
-				LoadStringOrDefault(hInstance, lszChromeNotDetected, MAX_LOADSTRING, IDS_CHROME_NOTDETECTED, sChromeNotDetected);
+				LoadStringOrDefault(hInstance, ltcChromeDetected, MAX_LOADSTRING, IDS_CHROME_DETECTED, g_tcChromeDetected);
+				LoadStringOrDefault(hInstance, ltcChromeNotDetected, MAX_LOADSTRING, IDS_CHROME_NOTDETECTED, g_tcChromeNotDetected);
 
-				SetDlgItemText(hwndDlg, IDC_LBL_CHROME_STATUS, lszChromeNotDetected);
+				SetDlgItemText(hDlg, IDC_LBL_CHROME_STATUS, ltcChromeNotDetected);
 
-				LoadStringOrDefault(hInstance, lszSendFailed, MAX_LOADSTRING, IDS_SEND_FAILED, sSendFailed);
-				LoadStringOrDefault(hInstance, lszSendSuccess, MAX_LOADSTRING, IDS_SEND_SUCCESS, sSendSuccess);
+				LoadStringOrDefault(hInstance, ltcSendFailed, MAX_LOADSTRING, IDS_SEND_FAILED, g_tcSendFailed);
+				LoadStringOrDefault(hInstance, ltcSendSuccess, MAX_LOADSTRING, IDS_SEND_SUCCESS, g_tcSendSuccess);
 
-				SetDlgItemText(hwndDlg, IDC_LBL_SEND_STATUS, TEXT(""));
+				SetDlgItemText(hDlg, IDC_LBL_SEND_STATUS, TEXT(""));
 
-				if (0 != SetTimer(hwndDlg,	IDT_REFRESH_CHROME_STATUS, int(1000 / refreshratehz), NULL))
+				if (0 != SetTimer(hDlg,	IDT_REFRESH_CHROME_STATUS, int(1000 / refreshratehz), NULL))
 				{
-					ShowWindow(GetDlgItem(hwndDlg, IDC_BTN_REFRESH), SW_HIDE);
+					ShowWindow(GetDlgItem(hDlg, IDC_BTN_REFRESH), SW_HIDE);
 				} 
 				else 
 				{
 					if (0 != LoadString(hInstance, IDS_BTN_REFRESH_CAPTION, szTemp, MAX_LOADSTRING)){
-						SetDlgItemText(hwndDlg, IDC_BTN_REFRESH, szTemp);
+						SetDlgItemText(hDlg, IDC_BTN_REFRESH, szTemp);
 					}
-					ShowWindow(GetDlgItem(hwndDlg, IDC_BTN_REFRESH), SW_SHOW);
+					ShowWindow(GetDlgItem(hDlg, IDC_BTN_REFRESH), SW_SHOW);
 				}
+				
+				char* pTemp = 0;
+				if (AllocAndCopyTCtoMB(&pTemp, g_tcRawFilepath, MAX_PATH)) {
+					StringCbCopyA(sRawFilepath, MAX_PATH, pTemp);
+					delete[] pTemp;
+				}
+				pTemp = 0;
+				if (AllocAndCopyTCtoMB(&pTemp, g_tcUrl, MAX_PATH)) {
+					StringCbCopyA(sUrl, MAX_PATH, pTemp);
+					delete[] pTemp;
+				}
+
+				StringCbCopyA(szVariable, MAX_LOADSTRING, "filearg");
+
+				UpdateField(hDlg, IDC_EDT_FILEPATH, sRawFilepath, MAX_PATH, true);
+				UpdateField(hDlg, IDC_EDT_SEND_URL, sUrl, MAX_PATH, true);
 			}
 			return TRUE;
 		case WM_TIMER: 
 			switch (wParam) 
 			{ 
 				case IDT_REFRESH_CHROME_STATUS: 
-					if(DetectChrome(&chromeInfo, sImageName)){
-						SetDlgItemText(hwndDlg, IDC_LBL_CHROME_STATUS, lszChromeDetected);
+					if(DetectChrome(&chromeInfo, g_tcImageName)){
+						SetDlgItemText(hDlg, IDC_LBL_CHROME_STATUS, ltcChromeDetected);
 					} else {
-						SetDlgItemText(hwndDlg, IDC_LBL_CHROME_STATUS, lszChromeNotDetected);
+						SetDlgItemText(hDlg, IDC_LBL_CHROME_STATUS, ltcChromeNotDetected);
 					}
 
 					return TRUE;
@@ -366,19 +487,46 @@ INT_PTR CALLBACK DlgProc(
 			wmEvent = HIWORD(wParam);
 			switch (wmId)
 			{
-				case IDC_BTN_SEND:
-					if(CreateFullPath(sFileName, szFullPath, sizeof(szFullPath)/ sizeof(TCHAR)) 
-						&& SendFile(GetFile(szFullPath), sUrl, NULL,NULL)){
-						SetDlgItemText(hwndDlg, IDC_LBL_SEND_STATUS, lszSendSuccess);
-					} else {
-						SetDlgItemText(hwndDlg, IDC_LBL_SEND_STATUS, lszSendFailed);
+				case IDCANCEL:
+						SendMessage(hDlg, WM_CLOSE, 0, 0);
+						return TRUE;
+				case IDC_BTN_SEND:{
+						UpdateField(hDlg, IDC_EDT_FILEPATH, sRawFilepath, MAX_PATH);
+						UpdateField(hDlg, IDC_EDT_SEND_URL, sUrl, MAX_PATH);
+						TCHAR tcRawFilepath[MAX_PATH];
+						TCHAR tcUrl[MAX_PATH];
+						TCHAR* pTemp = 0;
+						if (AllocAndCopyMBtoTC(&pTemp, sUrl, MAX_PATH)) {
+							StringCbCopy(tcUrl, MAX_PATH, pTemp);
+							delete[] pTemp;
+						} 
+						pTemp = 0;
+						if (AllocAndCopyMBtoTC(&pTemp, sRawFilepath, MAX_PATH)) {
+							StringCbCopy(tcRawFilepath, MAX_PATH, pTemp);
+							delete[] pTemp;
+						}
+						TCHAR tcFullPath[MAX_PATH];
+						TCHAR *tcFilenamePart;
+						if(CreateFullPath(tcRawFilepath, tcFullPath, sizeof(tcFullPath)/ sizeof(TCHAR), &tcFilenamePart) )
+						{
+							char* pFilenamePart = 0;
+							if (AllocAndCopyTCtoMB(&pFilenamePart, tcFilenamePart, MAX_PATH)) 
+
+							if(SendFile(GetFile(tcFullPath), tcUrl, szVariable, pFilenamePart)) {
+								SetDlgItemText(hDlg, IDC_LBL_SEND_STATUS, ltcSendSuccess);
+							} else {
+								SetDlgItemText(hDlg, IDC_LBL_SEND_STATUS, ltcSendFailed);
+							}
+							
+							if(pFilenamePart) delete[] pFilenamePart;
+						}
 					}
 					return TRUE;	
 				case IDC_BTN_REFRESH:
-					if(DetectChrome(&chromeInfo, sFileName, true)){
-						SetDlgItemText(hwndDlg, IDC_LBL_CHROME_STATUS, lszChromeDetected);
+					if(DetectChrome(&chromeInfo, g_tcImageName, true)){
+						SetDlgItemText(hDlg, IDC_LBL_CHROME_STATUS, ltcChromeDetected);
 					} else {
-						SetDlgItemText(hwndDlg, IDC_LBL_CHROME_STATUS, lszChromeNotDetected);
+						SetDlgItemText(hDlg, IDC_LBL_CHROME_STATUS, ltcChromeNotDetected);
 					}
 					return TRUE;
 					
@@ -386,13 +534,15 @@ INT_PTR CALLBACK DlgProc(
 			break;
 
 		case WM_CLOSE:
-			KillTimer(hwndDlg, IDT_REFRESH_CHROME_STATUS);
+			KillTimer(hDlg, IDT_REFRESH_CHROME_STATUS);
+			DestroyWindow(hDlg);
+			return TRUE;
+		case WM_DESTROY:
 			PostQuitMessage(0);
 			return TRUE;
 	}
 
-	return DefWindowProc(hwndDlg, uMsg, wParam, lParam);
-	//return FALSE;
+	return FALSE;
 }
 
 
@@ -402,18 +552,21 @@ int APIENTRY _tWinMain(_In_ HINSTANCE hInstance,
                      _In_ LPTSTR    lpCmdLine,
                      _In_ int       nCmdShow)
 {
- 	// TODO: Place code here.
-	MSG msg;
 
-	HWND hWnd = CreateDialogParam(hInstance, MAKEINTRESOURCE(IDD_DLG_MAIN), NULL , DlgProc, reinterpret_cast<LPARAM>(hInstance));
-	ShowWindow(hWnd, SW_SHOW);
+	HWND hDlg = CreateDialogParam(hInstance, MAKEINTRESOURCE(IDD_DLG_MAIN), NULL , DlgProc, reinterpret_cast<LPARAM>(hInstance));
+	ShowWindow(hDlg, SW_SHOW);
 
 
 	// Main message loop:
+	BOOL ret;
+	MSG msg;
+
 	while (GetMessage(&msg, NULL, 0, 0))
 	{
-		TranslateMessage(&msg);
-		DispatchMessage(&msg);
+		if(!IsDialogMessage(hDlg, &msg)) {
+			TranslateMessage(&msg);
+			DispatchMessage(&msg);
+		}
 	}
 
 	return (int) msg.wParam;
