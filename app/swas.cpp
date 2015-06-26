@@ -104,7 +104,7 @@ void ShowAnError(DWORD err, const TCHAR* pDesc = NULL, const TCHAR* pModuleName 
 	}
 }
 
-bool MatcProcesg_tcImageName(DWORD dwProcId,const TCHAR* tcImageName, bool bTestRunning=false)
+bool MatcProcessImageName(DWORD dwProcId,const TCHAR* tcImageName, bool bTestRunning=false)
 {
 	if(NULL == tcImageName) return false;
 	HANDLE hProc = OpenProcess( PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, FALSE, dwProcId );
@@ -139,7 +139,7 @@ bool MatcProcesg_tcImageName(DWORD dwProcId,const TCHAR* tcImageName, bool bTest
 
 bool DetectChrome(ChromeInfo* pPrevInfo, const TCHAR* tcChromeImageName, bool bRetry = false) {
 	if(pPrevInfo && pPrevInfo->bValid) {
-		pPrevInfo->bValid = MatcProcesg_tcImageName(pPrevInfo->dwProcId, tcChromeImageName, true);
+		pPrevInfo->bValid = MatcProcessImageName(pPrevInfo->dwProcId, tcChromeImageName, true);
 		if(!(!pPrevInfo->bValid && bRetry))
 			return pPrevInfo->bValid;
 	} 
@@ -151,7 +151,7 @@ bool DetectChrome(ChromeInfo* pPrevInfo, const TCHAR* tcChromeImageName, bool bR
 	for (int i = nProcCount; i > 0; --i ) {
 		DWORD dwCurrentProcId = runningProcessIds[i];
 		if(0 != dwCurrentProcId) {	
-			if(MatcProcesg_tcImageName(dwCurrentProcId, tcChromeImageName)){
+			if(MatcProcessImageName(dwCurrentProcId, tcChromeImageName)){
 				if (pPrevInfo) {
 					pPrevInfo->bValid = true;
 					pPrevInfo->dwProcId = dwCurrentProcId;
@@ -193,9 +193,9 @@ bool AllocAndCopyTCtoMB(char** ppDst, const TCHAR* pSrc, const int nLendth, UINT
 	int res = WideCharToMultiByte( nCodePade, 0, pSrc, nLendth, pDst, nLendth, NULL, NULL );
 #else
 	char *pDst = new char[ nLendth]; 
-	int res = StringCbCopyA(pDst, pSrc, nLendth)
+	int res = StringCbCopyA(pDst, nLendth, pSrc);
 #endif
-	if( res != 0) {
+	if( SUCCEEDED(res)) {
 		*ppDst = pDst;
 		return true;
 	} else {
@@ -211,9 +211,9 @@ bool AllocAndCopyMBtoTC(TCHAR** ppDst, const char* pSrc, const int nLendth, UINT
 	int res = MultiByteToWideChar(nCodePade, 0, pSrc, nLendth, pDst, nLendth);
 #else
 	char *pDst = new char[nLendth]; 
-	int res = StringCbCopyA(pDst, pSrc, nLendth)
+	int res = StringCbCopyA(pDst, nLendth, pSrc);
 #endif
-	if( res != 0) {
+	if( SUCCEEDED(res)) {
 		*ppDst = pDst;
 		return true;
 	} else {
@@ -221,7 +221,6 @@ bool AllocAndCopyMBtoTC(TCHAR** ppDst, const char* pSrc, const int nLendth, UINT
 	}
 	return false;
 }
-
 
 bool GenerateBoundary(char* sDst, int nDstSize, const char* sFileName) {
 	if (nDstSize<38) return false;
@@ -421,7 +420,6 @@ INT_PTR CALLBACK DlgProc(
 	{
 		case WM_INITDIALOG:
 			{
-				ShowAnError(87);
 				HINSTANCE hInstance = reinterpret_cast<HINSTANCE>(lParam);
 				TCHAR szTemp[MAX_LOADSTRING];
 				if (0 != LoadString(hInstance, IDS_APP_TITLE, szTemp, MAX_LOADSTRING)){
