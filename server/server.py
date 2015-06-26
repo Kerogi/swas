@@ -21,7 +21,7 @@ class Upload(tornado.web.RequestHandler):
             print "Receiving file:", fileinfo['filename']
             fname = fileinfo['filename']
             cname = str(uuid.uuid4()) + '.' +fname 
-            fh = open(__UPLOADS__ + cname, 'w')
+            fh = open(__UPLOADS__ + cname, 'wb')
             fh.write(fileinfo['body'])
             #self.finish(cname + " is uploaded!! Check %s folder" %__UPLOADS__)
             self.redirect("/")
