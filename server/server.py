@@ -15,6 +15,7 @@ class Userform(tornado.web.RequestHandler):
  
 class Upload(tornado.web.RequestHandler):
     def post(self):
+        print self.request
         if self.request.files['filearg']:
             fileinfo = self.request.files['filearg'][0]
             print "Receiving file:", fileinfo['filename']
@@ -29,6 +30,7 @@ class Upload(tornado.web.RequestHandler):
 application = tornado.web.Application([
         (r"/", Userform),
         (r"/upload", Upload),
+        (r"/download/(.*)", tornado.web.StaticFileHandler, {'path': __UPLOADS__}),
         ], debug=True)
  
  
