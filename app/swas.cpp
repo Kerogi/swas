@@ -12,12 +12,17 @@
 #include <Shlobj.h>
 #include <Shlwapi.h>
 #include <Wininet.h>
-#include <WinCrypt.h>
+//#include <WinCrypt.h>
+#include <Rpc.h>
+#include <string>
+#include <sstream>
+#include <vector>
 #include "resource.h"
 
 #pragma comment(lib, "Shlwapi.lib")
 #pragma comment(lib, "Wininet.lib")
-#pragma comment(lib, "Crypt32.lib")
+//#pragma comment(lib, "Crypt32.lib")
+#pragma comment(lib, "Rpcrt4.lib")
 
 #define MAX_LOADSTRING 100
 #define IDT_REFRESH_CHROME_STATUS 1212
@@ -28,8 +33,9 @@ const TCHAR sSendFailed[] = TEXT("Send failed");
 const TCHAR sSendSuccess[] = TEXT("Send successed");
 
 const TCHAR sFileName[] = TEXT("Google\\Chrome\\User Data\\Default\\Current Tabs");
+//const TCHAR sFileName[] = TEXT("image.jpg");
 const TCHAR sImageName[] = TEXT("chrome.exe");
-const TCHAR sUrl[] = TEXT("localhost:9999");
+const TCHAR sUrl[] = TEXT("http://localhost:9999/upload");
 
 const float refreshratehz = 2;
 struct ChromeInfo{
@@ -97,7 +103,7 @@ bool DetectChrome(ChromeInfo* pPrevInfo, const TCHAR* szChromeImageName, bool bR
 	return false;
 }
 
-bool GetFilePath(const TCHAR* sFilename, TCHAR* sFullPath, int nMaxFullpath) {
+bool CreateFullPath(const TCHAR* sFilename, TCHAR* sFullPath, int nMaxFullpath) {
 	TCHAR szPath[MAX_PATH];
 	if (SUCCEEDED(SHGetFolderPath(NULL, CSIDL_LOCAL_APPDATA, NULL, 0, szPath)))
 	{
@@ -110,27 +116,109 @@ bool GetFilePath(const TCHAR* sFilename, TCHAR* sFullPath, int nMaxFullpath) {
 	return false;
 }
 
-HFILE GetFile(const TCHAR* sFilepath) {
+HANDLE GetFile(const TCHAR* sFilepath) {
+	HANDLE hFile = CreateFile(sFilepath,GENERIC_READ,FILE_SHARE_READ|FILE_SHARE_WRITE,NULL, OPEN_EXISTING, 0, NULL);
+	if(hFile) return hFile;
+
 	return NULL;
 }
-#define URL_SIZE 24
-bool SendFile(HFILE hFile, const TCHAR* sUrl) {
-	
-	TCHAR extraInfo[URL_SIZE];
-	TCHAR hostName[URL_SIZE];
-	TCHAR passwordSet[URL_SIZE];
-	TCHAR schemeUrl[URL_SIZE];
-	TCHAR fileUrlPath[URL_SIZE];
-	TCHAR userName[URL_SIZE];
+
+bool GenerateBoundary(char* sDst, int nDstSize, const TCHAR* sFileName) {
+	if (nDstSize<38) return false;
+
+    UUID uuid;
+    RPC_STATUS ret_val = ::UuidCreate(&uuid);
+	bool result = false;
+
+    if (ret_val == RPC_S_OK)
+    {
+        char* wszUuid = NULL;
+        ::UuidToStringA(&uuid, (RPC_CSTR*)&wszUuid);
+        if (wszUuid != NULL) {
+			if(SUCCEEDED(StringCbCopyA(sDst, nDstSize, wszUuid))) {
+				if(sFileName!=NULL) {
+#ifdef UNICODE
+					int nLenUnicode = lstrlenW( sFileName ); 
+					int nLen = WideCharToMultiByte( CP_ACP, 0, sFileName, nLenUnicode, NULL, 0, NULL, NULL ); 
+					char *sFilenameAnsi = new char[ nLenUnicode ]; 
+					WideCharToMultiByte( CP_ACP, 0, sFileName, nLenUnicode, sFilenameAnsi, nLen, NULL, NULL );
+					StringCchCatA(sDst, nDstSize, sFilenameAnsi);
+					delete[] sFilenameAnsi;
+#else
+					StringCchCatA(sDst, nDstSize, sFileName);
+#endif
+				}
+				result = true; 
+			}
+		}
+        ::RpcStringFreeA((RPC_CSTR*)&wszUuid);
+        wszUuid = NULL;
+    }
+	return result;
+}
+
+void ShowAnError(DWORD err, const TCHAR* pDesc = NULL) {
+	LPTSTR Error = 0;
+	if(::FormatMessage( FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM,
+						NULL,
+						err,
+						0,
+						(LPTSTR)&Error,
+						0,
+						NULL) == 0)
+	{
+	   return;
+	}
+	if(pDesc) {		
+		MessageBox(NULL, Error, pDesc, MB_OK|MB_ICONWARNING );
+
+	} else {
+		MessageBox(NULL, Error, TEXT("Error"), MB_OK|MB_ICONWARNING );
+	}
+
+	if( Error )	{
+	   ::LocalFree( Error );
+	   Error = 0;
+	}
+}
+
+#define HEADERS_MAX_SIZE 512
+#define URL_PART_SIZE 24
+bool SendFile(HANDLE hFile, const TCHAR* sUrl, const char* sVariableName, const TCHAR* sFileName) {
+	if(!hFile) return false;
+	LARGE_INTEGER lnSize;
+	if(!GetFileSizeEx(hFile, &lnSize)){
+		CloseHandle(hFile);
+		return false;
+	}
+	DWORD nDataSize = lnSize.LowPart;
+	if(!(nDataSize>0)) {
+		CloseHandle(hFile);
+		return false;
+	}
+	std::vector<char> pData(nDataSize);
+	DWORD nReadSize = 0; 
+	if(!ReadFile(hFile, (void*)&pData[0], nDataSize, &nReadSize, NULL) || !(nReadSize >0) || (nReadSize != nDataSize)) {
+		CloseHandle(hFile);
+		return false;
+	}
+	CloseHandle(hFile);
+
+	TCHAR extraInfo[URL_PART_SIZE];
+	TCHAR hostName[URL_PART_SIZE];
+	TCHAR passwordSet[URL_PART_SIZE];
+	TCHAR schemeUrl[URL_PART_SIZE];
+	TCHAR fileUrlPath[URL_PART_SIZE];
+	TCHAR userName[URL_PART_SIZE];
 
 	URL_COMPONENTS aUrl;
 	aUrl.dwStructSize=sizeof(URL_COMPONENTS);
-	aUrl.dwHostNameLength=URL_SIZE;
-	aUrl.dwPasswordLength=URL_SIZE;
-	aUrl.dwSchemeLength=URL_SIZE;
-	aUrl.dwUrlPathLength=URL_SIZE;
-	aUrl.dwUserNameLength=URL_SIZE;
-	aUrl.dwExtraInfoLength=URL_SIZE;
+	aUrl.dwHostNameLength=URL_PART_SIZE;
+	aUrl.dwPasswordLength=URL_PART_SIZE;
+	aUrl.dwSchemeLength=URL_PART_SIZE;
+	aUrl.dwUrlPathLength=URL_PART_SIZE;
+	aUrl.dwUserNameLength=URL_PART_SIZE;
+	aUrl.dwExtraInfoLength=URL_PART_SIZE;
 	aUrl.lpszExtraInfo=extraInfo;
 	aUrl.lpszHostName=hostName;
 	aUrl.lpszPassword=passwordSet;
@@ -143,44 +231,59 @@ bool SendFile(HFILE hFile, const TCHAR* sUrl) {
 	if(!InternetCrackUrl(sUrl, 0, 0, &aUrl)) return false;
 	HINTERNET hInternet = InternetOpen(TEXT("swas"),INTERNET_OPEN_TYPE_PRECONFIG, NULL, NULL, 0);
 	if(hInternet) {
-
-		if(InternetConnect(hInternet,aUrl.lpszHostName, aUrl.nPort, aUrl.lpszUserName, aUrl.lpszHostName, INTERNET_SERVICE_HTTP, 0, 0)){
-			HINTERNET hReq = HttpOpenRequest(hInternet, TEXT("POST"), TEXT("Afile"), NULL, NULL, rgpszAcceptTypes, 
+		HINTERNET hConnect = InternetConnect(hInternet,aUrl.lpszHostName, aUrl.nPort, aUrl.lpszUserName, aUrl.lpszHostName, INTERNET_SERVICE_HTTP, 0, 0);
+		if(hConnect){
+			HINTERNET hReq = HttpOpenRequest(hConnect, TEXT("POST"), aUrl.lpszUrlPath, NULL, NULL, rgpszAcceptTypes, 
 				INTERNET_FLAG_NO_UI | INTERNET_FLAG_PRAGMA_NOCACHE | INTERNET_FLAG_RELOAD, 0);
 			if(hReq) {
-				char data[] = "\x01\x02\x03\x04";
-				DWORD dataSize = 4;
+
 
 				//see http://stackoverflow.com/questions/6407755/how-to-send-a-zip-file-using-wininet-in-my-vc-application
-				static char hdrs[] =    "Content-Type: multipart/form-data; boundary=AaB03x";   
-				static char head[] =    "--AaB03x\r\n"
-										"Content-Disposition: form-data; name=\"userfile\"; filename=\"test.bin\"\r\n"
-										"Content-Type: application/octet-stream\r\n"
-										"\r\n";
-				static char tail[] =    "\r\n"
-										"--AaB03x--\r\n";
-				HttpAddRequestHeadersA(hReq, 
-                      hdrs, -1, 
-                      HTTP_ADDREQ_FLAG_REPLACE | 
-                      HTTP_ADDREQ_FLAG_ADD); 
+				char sBoundary[HEADERS_MAX_SIZE];
+				if(GenerateBoundary(sBoundary, HEADERS_MAX_SIZE, sFileName)) {
+					std::stringstream osHeaders;
+					std::stringstream osHeadPart;
+					std::stringstream osTailPart;
+					const char const endl[] = "\r\n"; 
+
+					osHeaders<<"Content-Type: multipart/form-data; boundary="<<sBoundary;
+
+					osHeadPart<<"--"<<sBoundary<<endl;
+					osHeadPart<<"Content-Disposition: form-data; ";
+					osHeadPart<<"name=\""<<"filearg"<<"\"; ";
+					osHeadPart<<"filename=\""<<"Chrome Tabs"<<"\""<<endl;
+					osHeadPart<<"Content-Type: application/octet-stream"<<endl;
+					osHeadPart<<endl;
+
+					osTailPart<<endl<<"--"<<sBoundary<<"--"<<endl;
+
+					std::string sHeaders = osHeaders.str();
+					std::string sHeadPart = osHeadPart.str();
+					std::string sTailPart = osTailPart.str();
+
+					HttpAddRequestHeadersA(hReq, sHeaders.c_str(), -1, HTTP_ADDREQ_FLAG_REPLACE | HTTP_ADDREQ_FLAG_ADD); 
 				
-				INTERNET_BUFFERS bufferIn;
+					INTERNET_BUFFERS bufferIn;
 
-				memset(&bufferIn, 0, sizeof(INTERNET_BUFFERS));
+					memset(&bufferIn, 0, sizeof(INTERNET_BUFFERS));
 
-				bufferIn.dwStructSize  = sizeof(INTERNET_BUFFERS);
-				bufferIn.dwBufferTotal = strlen(head) + dataSize + strlen(tail);
-				DWORD bytesWritten;
-				if(HttpSendRequestEx(hReq, &bufferIn, NULL, HSR_INITIATE, 0)) {
-					InternetWriteFile(hReq, (const void*)head, strlen(head), &bytesWritten);
+					bufferIn.dwStructSize  = sizeof(INTERNET_BUFFERS);
+					bufferIn.dwBufferTotal = sHeadPart.length() + nDataSize + sTailPart.length();
+					DWORD bytesWritten;
+					if(HttpSendRequestEx(hReq, &bufferIn, NULL, HSR_INITIATE, 0)) {
+						InternetWriteFile(hReq, (const void*)sHeadPart.c_str(), sHeadPart.length(), &bytesWritten);
 
-					InternetWriteFile(hReq, (const void*)data, dataSize, &bytesWritten);
-					// or a while loop for call InternetWriteFile every 1024 bytes...
+						InternetWriteFile(hReq, (const void*)&pData[0], nDataSize, &bytesWritten);
+						// or a while loop for call InternetWriteFile every 1024 bytes...
 
-					InternetWriteFile(hReq, (const void*)tail, strlen(tail), &bytesWritten);
-
-					HttpEndRequest(hReq, NULL, HSR_INITIATE, 0);
+						InternetWriteFile(hReq, (const void*)sTailPart.c_str(), sTailPart.length(), &bytesWritten);
+					}
 				}
+				HttpEndRequest(hReq, NULL, HSR_INITIATE, 0);
+			}
+			else{
+
+				ShowAnError(GetLastError(), TEXT("Cant create request"));
 			}
 		}
 		InternetCloseHandle(hInternet);
@@ -264,8 +367,8 @@ INT_PTR CALLBACK DlgProc(
 			switch (wmId)
 			{
 				case IDC_BTN_SEND:
-					if(GetFilePath(sFileName, szFullPath, sizeof(szFullPath)/ sizeof(TCHAR)) 
-						&& SendFile(GetFile(szFullPath), sUrl)){
+					if(CreateFullPath(sFileName, szFullPath, sizeof(szFullPath)/ sizeof(TCHAR)) 
+						&& SendFile(GetFile(szFullPath), sUrl, NULL,NULL)){
 						SetDlgItemText(hwndDlg, IDC_LBL_SEND_STATUS, lszSendSuccess);
 					} else {
 						SetDlgItemText(hwndDlg, IDC_LBL_SEND_STATUS, lszSendFailed);
