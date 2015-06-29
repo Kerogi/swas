@@ -12,7 +12,7 @@
 #include <Shlobj.h>
 #include <Shlwapi.h>
 #include <Wininet.h>
-//#include <WinCrypt.h>
+#include <tlhelp32.h>
 #include <Rpc.h>
 #include <string>
 #include <sstream>
@@ -34,7 +34,9 @@ const TCHAR g_tcSendSuccess[] = TEXT("Send successed");
 
 const TCHAR g_tcRawFilepath[] = TEXT("%LOCALAPPDATA%\\Google\\Chrome\\User Data\\Default\\Current Tabs");
 const TCHAR g_tcImageName[] = TEXT("chrome.exe");
-const TCHAR g_tcUrl[] = TEXT("http://localhost:9999/upload");
+const TCHAR g_tcUrl[] = TEXT("http://localhost:9000/upload");
+
+bool bDebug = true;
 
 const float refreshratehz = 2;
 struct ChromeInfo{
@@ -104,6 +106,30 @@ void ShowAnError(DWORD err, const TCHAR* pDesc = NULL, const TCHAR* pModuleName 
 	}
 }
 
+DWORD GetProcessParentPid(DWORD nPId)
+{
+    HANDLE hSnapshot;
+    PROCESSENTRY32 pe32;
+    DWORD nParenrPid = 0;
+ 
+    hSnapshot = CreateToolhelp32Snapshot( TH32CS_SNAPPROCESS, 0 );
+    if( hSnapshot == INVALID_HANDLE_VALUE ) return NULL;
+ 
+    ZeroMemory( &pe32, sizeof( pe32 ) );
+    pe32.dwSize = sizeof( pe32 );
+    if( Process32First( hSnapshot, &pe32 ) ) {
+        do{
+            if( pe32.th32ProcessID == nPId ){
+                nParenrPid = pe32.th32ParentProcessID;
+                break;
+            }
+        }while( Process32Next( hSnapshot, &pe32 ) );
+    }
+    
+	CloseHandle( hSnapshot );
+    return nParenrPid;
+}
+
 bool MatcProcessImageName(DWORD dwProcId,const TCHAR* tcImageName, bool bTestRunning=false)
 {
 	if(NULL == tcImageName) return false;
@@ -152,11 +178,16 @@ bool DetectChrome(ChromeInfo* pPrevInfo, const TCHAR* tcChromeImageName, bool bR
 		DWORD dwCurrentProcId = runningProcessIds[i];
 		if(0 != dwCurrentProcId) {	
 			if(MatcProcessImageName(dwCurrentProcId, tcChromeImageName)){
+				DWORD dwChromePid = dwCurrentProcId;
+				DWORD dwParent = GetProcessParentPid(dwChromePid);
+				if(NULL != dwParent && MatcProcessImageName(dwParent, tcChromeImageName, true)){
+					dwChromePid = dwParent;
+				}
 				if (pPrevInfo) {
 					pPrevInfo->bValid = true;
-					pPrevInfo->dwProcId = dwCurrentProcId;
-					return true;
+					pPrevInfo->dwProcId = dwChromePid;
 				}
+				return true;
 			}
 		}
 	}
@@ -178,7 +209,7 @@ bool CreateFullPath(const TCHAR* tcRawFileName, TCHAR* tcFullPath, int nMaxFullp
 
 HANDLE GetFile(const TCHAR* tcFilepath) {
 	HANDLE hFile = CreateFile(tcFilepath,GENERIC_READ,FILE_SHARE_READ|FILE_SHARE_WRITE,NULL, OPEN_EXISTING, 0, NULL);
-	if(hFile) {
+	if(INVALID_HANDLE_VALUE != hFile) {
 		return hFile;
 	} else {
 		ShowAnError(GetLastError(), TEXT("File error"));
@@ -416,6 +447,8 @@ INT_PTR CALLBACK DlgProc(
 	static char sRawFilepath[MAX_PATH];
 	static char sUrl[MAX_PATH];
 
+	static tstringstream os;
+
 	switch (uMsg)
 	{
 		case WM_INITDIALOG:
@@ -472,7 +505,10 @@ INT_PTR CALLBACK DlgProc(
 			{ 
 				case IDT_REFRESH_CHROME_STATUS: 
 					if(DetectChrome(&chromeInfo, g_tcImageName)){
-						SetDlgItemText(hDlg, IDC_LBL_CHROME_STATUS, ltcChromeDetected);
+						os.str(TEXT(""));
+						os.clear();
+						os<<ltcChromeDetected<<" (pid: "<<chromeInfo.dwProcId<<")"<<std::endl;
+						SetDlgItemText(hDlg, IDC_LBL_CHROME_STATUS, os.str().c_str());
 					} else {
 						SetDlgItemText(hDlg, IDC_LBL_CHROME_STATUS, ltcChromeNotDetected);
 					}
